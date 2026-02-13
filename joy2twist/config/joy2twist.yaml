@@ -13,6 +13,10 @@
       regular: 0.5
       slow: 0.2
 
+    mode_switch:
+      enabled: true
+      set_teleop_mode_srv: "/bt_node/set_teleop_mode"
+
     # This button mapping should be adjusted to the specific controller.
     # The following map is suited for Logitech F710 in the DirectInput mode.
     # Input declaration consists of:

@@ -13,6 +13,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_srvs/srv/set_bool.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
 #include "joy2twist/joy_input.hpp"
@@ -23,6 +24,7 @@ using MsgJoy = sensor_msgs::msg::Joy;
 using MsgTwist = geometry_msgs::msg::Twist;
 using MsgTwistStamped = geometry_msgs::msg::TwistStamped;
 using MsgBool = std_msgs::msg::Bool;
+using SrvSetBool = std_srvs::srv::SetBool;
 using SrvTrigger = std_srvs::srv::Trigger;
 
 struct RawInputIndex
@@ -76,6 +78,7 @@ private:
   void convert_joy_to_twist(const std::shared_ptr<MsgJoy> joy_msg, MsgTwist & twist_msg);
   std::pair<float, float> determine_velocity_factor(const std::shared_ptr<MsgJoy> joy_msg);
   void publish_twist(const MsgTwist & twist_msg);
+  void call_set_bool_service(const rclcpp::Client<SrvSetBool>::SharedPtr & client, bool value) const;
   void call_trigger_service(const rclcpp::Client<SrvTrigger>::SharedPtr & client) const;
   void trigger_service_cb(
     const rclcpp::Client<SrvTrigger>::SharedFuture & future,
@@ -88,6 +91,7 @@ private:
 
   InputIndex input_index_;
   bool driving_mode_;
+  bool mode_switch_enabled_;
   bool e_stop_present_;
   bool e_stop_state_;
   bool cmd_vel_stamped_;
@@ -95,6 +99,7 @@ private:
   std::string e_stop_topic_;
   std::string e_stop_reset_srv_;
   std::string e_stop_trigger_srv_;
+  std::string set_teleop_mode_srv_;
 
   int diagnostic_status_ = diagnostic_msgs::msg::DiagnosticStatus::OK;
 
@@ -102,6 +107,7 @@ private:
   rclcpp::Subscription<MsgJoy>::SharedPtr joy_sub_;
   rclcpp::Publisher<MsgTwist>::SharedPtr twist_pub_;
   rclcpp::Publisher<MsgTwistStamped>::SharedPtr twist_stamped_pub_;
+  rclcpp::Client<SrvSetBool>::SharedPtr set_teleop_mode_client_;
   rclcpp::Client<SrvTrigger>::SharedPtr e_stop_reset_client_;
   rclcpp::Client<SrvTrigger>::SharedPtr e_stop_trigger_client_;
 

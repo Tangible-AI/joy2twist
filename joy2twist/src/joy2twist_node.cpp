@@ -7,6 +7,8 @@ using std::placeholders::_1;
 Joy2TwistNode::Joy2TwistNode() : Node("joy2twist_node")
 {
   using namespace std::placeholders;
+  driving_mode_ = false;
+  e_stop_state_ = false;
 
   declare_parameters();
   load_parameters();
@@ -28,6 +30,10 @@ Joy2TwistNode::Joy2TwistNode() : Node("joy2twist_node")
       std::bind(&Joy2TwistNode::e_stop_cb, this, _1));
     e_stop_reset_client_ = this->create_client<SrvTrigger>(e_stop_reset_srv_);
     e_stop_trigger_client_ = this->create_client<SrvTrigger>(e_stop_trigger_srv_);
+  }
+
+  if (mode_switch_enabled_) {
+    set_teleop_mode_client_ = this->create_client<SrvSetBool>(set_teleop_mode_srv_);
   }
 
   diagnostic_updater_ = std::make_shared<diagnostic_updater::Updater>(this);
@@ -63,6 +69,8 @@ void Joy2TwistNode::declare_parameters()
   this->declare_parameter<std::string>("e_stop.topic", "e_stop");
   this->declare_parameter<std::string>("e_stop.reset_srv", "e_stop_reset");
   this->declare_parameter<std::string>("e_stop.trigger_srv", "e_stop_trigger");
+  this->declare_parameter<bool>("mode_switch.enabled", false);
+  this->declare_parameter<std::string>("mode_switch.set_teleop_mode_srv", "/bt_node/set_teleop_mode");
 
   this->declare_parameter<std::string>("input_index_map.axis.angular_z", "A2");
   this->declare_parameter<std::string>("input_index_map.axis.linear_x", "A1");
@@ -92,6 +100,8 @@ void Joy2TwistNode::load_parameters()
   this->get_parameter<std::string>("e_stop.topic", e_stop_topic_);
   this->get_parameter<std::string>("e_stop.reset_srv", e_stop_reset_srv_);
   this->get_parameter<std::string>("e_stop.trigger_srv", e_stop_trigger_srv_);
+  this->get_parameter<bool>("mode_switch.enabled", mode_switch_enabled_);
+  this->get_parameter<std::string>("mode_switch.set_teleop_mode_srv", set_teleop_mode_srv_);
 
   RawInputIndex raw_input_index{};
 
@@ -169,13 +179,23 @@ void Joy2TwistNode::joy_cb(const MsgJoy::SharedPtr joy_msg)
   handle_x_input_check(joy_msg);
   handle_e_stop(joy_msg);
 
-  if (get_joy_input_as_btn(joy_msg, input_index_.dead_man_switch)) {
-    driving_mode_ = true;
+  bool dead_man_pressed = get_joy_input_as_btn(joy_msg, input_index_.dead_man_switch);
+
+  if (dead_man_pressed) {
+    if (!driving_mode_) {
+      driving_mode_ = true;
+      if (mode_switch_enabled_ && set_teleop_mode_client_) {
+        call_set_bool_service(set_teleop_mode_client_, true);
+      }
+    }
     convert_joy_to_twist(joy_msg, twist_msg);
     publish_twist(twist_msg);
   } else if (driving_mode_) {
     driving_mode_ = false;
     publish_twist(twist_msg);
+    if (mode_switch_enabled_ && set_teleop_mode_client_) {
+      call_set_bool_service(set_teleop_mode_client_, false);
+    }
   }
 }
 
@@ -217,6 +237,34 @@ void Joy2TwistNode::publish_twist(const MsgTwist & twist_msg)
   } else {
     twist_pub_->publish(twist_msg);
   }
+}
+
+void Joy2TwistNode::call_set_bool_service(
+  const rclcpp::Client<SrvSetBool>::SharedPtr & client, bool value) const
+{
+  if (!client || !client->service_is_ready()) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 2000,
+      "Can't contact %s service", client ? client->get_service_name() : "<null>");
+    return;
+  }
+
+  auto request = std::make_shared<SrvSetBool::Request>();
+  request->data = value;
+  client->async_send_request(
+    request,
+    [this, value, service_name = std::string(client->get_service_name())](
+      const rclcpp::Client<SrvSetBool>::SharedFuture future) {
+      if (!future.get()->success) {
+        RCLCPP_WARN(
+          this->get_logger(), "Failed to call %s with %s: %s", service_name.c_str(),
+          value ? "true" : "false", future.get()->message.c_str());
+        return;
+      }
+      RCLCPP_INFO(
+        this->get_logger(), "Called %s with %s", service_name.c_str(),
+        value ? "true" : "false");
+    });
 }
 
 void Joy2TwistNode::call_trigger_service(const rclcpp::Client<SrvTrigger>::SharedPtr & client) const
